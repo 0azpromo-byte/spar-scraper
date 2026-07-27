@@ -7,13 +7,16 @@ import time
 import traceback
 from datetime import datetime, timedelta
 
+
 import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
 
+
 # ============================================================
 # KONFIGURACIJA
 # ============================================================
+
 
 SERVICE_ACCOUNT = "serviceAccountKey.json"
 TRGOVINA = "Spar"
@@ -21,10 +24,12 @@ GRAD = "Bjelovar"
 CSV_ENCODING = "cp1250"
 DELIMITER = ";"
 
+
 # Quota
 HRANA_QUOTA = 1000
 OSTALO_QUOTA = 1000
 LOKALNI_TEST = os.environ.get("LOKALNI_TEST", "false").lower() == "true"
+
 
 # Kategorije mapping
 KATEGORIJE_MAP = {
@@ -36,9 +41,11 @@ KATEGORIJE_MAP = {
     "Toaletne potrepštine": "TOALETNE_POTREPŠTINE",
 }
 
+
 # SPAR config
 SPAR_JSON_URL = "https://www.spar.hr/datoteke_cjenici/Cjenik{date}.json"
 SPAR_SEARCH_KEYWORD = "bjelovar"
+
 
 # CSV column names
 COL_NAZIV = "naziv"
@@ -55,18 +62,36 @@ COL_BARKOD = "barkod"
 COL_KATEGORIJA = "kategorija proizvoda"
 
 
+
+
 # ============================================================
 # FIREBASE INICIJALIZACIJA
 # ============================================================
+
 
 cred = credentials.Certificate(SERVICE_ACCOUNT)
 firebase_admin.initialize_app(cred)
 db = firestore.client()
 
 
+# ---------- PROVJERA DUPLIKATA ----------
+def vec_scrapano_danas(trgovina: str) -> bool:
+    """Provjeri postoji li već današnji datum za ovu trgovinu u cijene kolekciji."""
+    today = datetime.now().strftime("%Y-%m-%d")
+    check = (
+        db.collection("cijene")
+        .whereEqualTo("trgovina", trgovina)
+        .whereEqualTo("datum", today)
+        .limit(1)
+        .get()
+    )
+    return not check.empty
+
+
 # ============================================================
 # FUNKCIJE
 # ============================================================
+
 
 def normalize_name(name):
     """Uklanja specijalne znakove i normalizira naziv za generiranje ID-a."""
@@ -76,6 +101,8 @@ def normalize_name(name):
     name = re.sub(r'[^a-z0-9\s]', '', name)
     name = re.sub(r'\s+', ' ', name)
     return name.strip()
+
+
 
 
 def generate_product_id(naziv, marka, kolicina, jedinica, barkod=""):
@@ -92,6 +119,8 @@ def generate_product_id(naziv, marka, kolicina, jedinica, barkod=""):
     if not parts:
         return "unknown_" + hashlib.md5(str(naziv).encode()).hexdigest()[:12]
     return "_".join(parts)
+
+
 
 
 def pronadji_spar_url(datum=None):
@@ -126,6 +155,8 @@ def pronadji_spar_url(datum=None):
         return None
 
 
+
+
 def pronadji_spar_url_sa_backup(datum=None):
     """Pokušaj pronaći URL, ako ne uspije pokušaj jučer."""
     if datum is None:
@@ -141,6 +172,8 @@ def pronadji_spar_url_sa_backup(datum=None):
     return pronadji_spar_url(juce)
 
 
+
+
 def preuzmi_csv(url):
     """Preuzima CSV datoteku s SPAR servera."""
     print(f"📥 Preuzimam CSV: {url}")
@@ -151,6 +184,8 @@ def preuzmi_csv(url):
     # SPAR koristi cp1250 encoding
     resp.encoding = CSV_ENCODING
     return resp.text
+
+
 
 
 def normaliziraj_kategoriju(raw):
@@ -166,6 +201,8 @@ def normaliziraj_kategoriju(raw):
             return value
     
     return "OSTALO"
+
+
 
 
 def obradi_csv(sadrzaj):
@@ -238,9 +275,13 @@ def obradi_csv(sadrzaj):
     return products
 
 
+
+
 def deterministicki_kljuc(product):
     """Generira deterministički ključ za proizvod."""
     return hashlib.md5(product["barkod"].encode()).hexdigest()
+
+
 
 
 def odaberi_proizvode(products):
@@ -270,6 +311,8 @@ def odaberi_proizvode(products):
     return selected
 
 
+
+
 def spremi_u_firestore(products):
     """Sprema proizvode u Firestore u batch operacijama."""
     batch_size = 500
@@ -291,14 +334,22 @@ def spremi_u_firestore(products):
             time.sleep(1)
 
 
+
+
 # ============================================================
 # MAIN
 # ============================================================
+
 
 def main():
     print(f"🚀 Pokrećem {TRGOVINA} scraper...")
     print(f"📍 Grad: {GRAD}")
     print(f"🔧 Lokalni test: {LOKALNI_TEST}")
+
+    # Provjera duplikata - preskoči ako je već scrapano danas
+    if vec_scrapano_danas(TRGOVINA):
+        print(f"⏭️ {TRGOVINA} je već scrapano danas ({datetime.now():%Y-%m-%d}). Preskačem.")
+        return
     
     try:
         # 1. Pronađi URL
@@ -330,6 +381,8 @@ def main():
         print(f"❌ GREŠKA: {e}")
         traceback.print_exc()
         exit(1)
+
+
 
 
 if __name__ == "__main__":
