@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 import requests
 import firebase_admin
 from firebase_admin import credentials, firestore
+from google.cloud.firestore_v1.base_query import FieldFilter
 
 
 # ============================================================
@@ -80,12 +81,12 @@ def vec_scrapano_danas(trgovina: str) -> bool:
     today = datetime.now().strftime("%Y-%m-%d")
     check = (
         db.collection("cijene")
-        .where("trgovina", "==", trgovina)
-        .where("datum", "==", today)
+        .where(filter=FieldFilter("trgovina", "==", trgovina))
+        .where(filter=FieldFilter("datum", "==", today))
         .limit(1)
         .get()
     )
-    return not check.empty
+    return len(check) > 0
 
 
 # ============================================================
