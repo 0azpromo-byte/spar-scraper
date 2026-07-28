@@ -80,8 +80,8 @@ def vec_scrapano_danas(trgovina: str) -> bool:
     today = datetime.now().strftime("%Y-%m-%d")
     check = (
         db.collection("cijene")
-        .whereEqualTo("trgovina", trgovina)
-        .whereEqualTo("datum", today)
+        .where("trgovina", "==", trgovina)
+        .where("datum", "==", today)
         .limit(1)
         .get()
     )
