@@ -63,8 +63,6 @@ COL_BARKOD = "barkod"
 COL_KATEGORIJA = "kategorija proizvoda"
 
 
-
-
 # ============================================================
 # FIREBASE INICIJALIZACIJA
 # ============================================================
@@ -104,8 +102,6 @@ def normalize_name(name):
     return name.strip()
 
 
-
-
 def generate_product_id(naziv, marka, kolicina, jedinica, barkod=""):
     """Generira jedinstveni ID proizvoda - koristi barkod ako postoji."""
     if barkod and str(barkod).strip():
@@ -120,8 +116,6 @@ def generate_product_id(naziv, marka, kolicina, jedinica, barkod=""):
     if not parts:
         return "unknown_" + hashlib.md5(str(naziv).encode()).hexdigest()[:12]
     return "_".join(parts)
-
-
 
 
 def pronadji_spar_url(datum=None):
@@ -156,8 +150,6 @@ def pronadji_spar_url(datum=None):
         return None
 
 
-
-
 def pronadji_spar_url_sa_backup(datum=None):
     """Pokušaj pronaći URL, ako ne uspije pokušaj jučer."""
     if datum is None:
@@ -173,8 +165,6 @@ def pronadji_spar_url_sa_backup(datum=None):
     return pronadji_spar_url(juce)
 
 
-
-
 def preuzmi_csv(url):
     """Preuzima CSV datoteku s SPAR servera."""
     print(f"📥 Preuzimam CSV: {url}")
@@ -185,8 +175,6 @@ def preuzmi_csv(url):
     # SPAR koristi cp1250 encoding
     resp.encoding = CSV_ENCODING
     return resp.text
-
-
 
 
 def normaliziraj_kategoriju(raw):
@@ -202,8 +190,6 @@ def normaliziraj_kategoriju(raw):
             return value
     
     return "OSTALO"
-
-
 
 
 def obradi_csv(sadrzaj):
@@ -276,13 +262,9 @@ def obradi_csv(sadrzaj):
     return products
 
 
-
-
 def deterministicki_kljuc(product):
     """Generira deterministički ključ za proizvod."""
     return hashlib.md5(product["barkod"].encode()).hexdigest()
-
-
 
 
 def odaberi_proizvode(products):
@@ -312,8 +294,6 @@ def odaberi_proizvode(products):
     return selected
 
 
-
-
 def spremi_u_firestore(products):
     """Sprema proizvode u Firestore u batch operacijama."""
     batch_size = 500
@@ -335,6 +315,50 @@ def spremi_u_firestore(products):
             time.sleep(1)
 
 
+# ============================================================
+# PADOVI CIJENA
+# ============================================================
+def detektiraj_i_spremi_padove(db, trgovina, grad, novi_proizvodi, batch_size=500):
+    danas = datetime.now().strftime("%Y-%m-%d")
+    print(f"  [price_drop] Provjeravam padove cijena za {trgovina} ({grad})...")
+    doc_refs = []
+    for p in novi_proizvodi:
+        doc_id = f"{p['barkod']}_{trgovina}_{grad}".replace(" ", "_")
+        doc_refs.append(db.collection("cijene").document(doc_id))
+    postojeca = {}
+    snapshots = db.get_all(doc_refs)
+    for snap in snapshots:
+        if snap.exists:
+            data = snap.to_dict()
+            postojeca[data.get("barkod", "")] = data
+    padovi = []
+    for p in novi_proizvodi:
+        barkod = p["barkod"]
+        if barkod not in postojeca:
+            continue
+        stara = postojeca[barkod].get("cijena")
+        nova = p.get("cijena")
+        if stara is None or nova is None:
+            continue
+        if stara > nova and p.get("tip") == "redovno":
+            postotak = round((stara - nova) / stara * 100, 1)
+            padovi.append({"barkod": barkod, "naziv": p.get("naziv", ""), "trgovina": trgovina, "grad": grad, "kategorija": p.get("kategorija"), "cijena_stara": stara, "cijena_nova": nova, "postotak": postotak, "datum": danas, "tip_pada": "redovno"})
+    if not padovi:
+        print(f"  [price_drop] Nema padova cijena za {trgovina}.")
+        return []
+    batch = db.batch()
+    brojac = 0
+    for pad in padovi:
+        doc_id = f"{pad['barkod']}_{pad['trgovina']}_{pad['datum']}".replace(" ", "_")
+        batch.set(db.collection("price_drops").document(doc_id), pad)
+        brojac += 1
+        if brojac % batch_size == 0:
+            batch.commit()
+            batch = db.batch()
+    if brojac % batch_size != 0:
+        batch.commit()
+    print(f"  [price_drop] ✅ Pronađeno {len(padovi)} padova cijena za {trgovina}.")
+    return padovi
 
 
 # ============================================================
@@ -373,7 +397,10 @@ def main():
         # 4. Odaberi prema kvotama
         selected = odaberi_proizvode(products)
         
-        # 5. Spremi u Firestore
+        # 5. Detektiraj padove cijena
+        detektiraj_i_spremi_padove(db, TRGOVINA, GRAD, selected)
+
+        # 6. Spremi u Firestore
         spremi_u_firestore(selected)
         
         print(f"🎉 Završeno! Spremljeno {len(selected)} proizvoda.")
@@ -382,8 +409,6 @@ def main():
         print(f"❌ GREŠKA: {e}")
         traceback.print_exc()
         exit(1)
-
-
 
 
 if __name__ == "__main__":
