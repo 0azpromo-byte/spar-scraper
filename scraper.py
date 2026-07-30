@@ -295,7 +295,7 @@ def odaberi_proizvode(products):
 
 
 def spremi_u_firestore(products):
-    """Sprema proizvode u Firestore u batch operacijama."""
+    """Sprema proizvode u Firestore u batch operacijama s retry."""
     batch_size = 500
     total = len(products)
     
@@ -308,7 +308,15 @@ def spremi_u_firestore(products):
             doc_ref = db.collection("cijene").document(doc_id)
             batch.set(doc_ref, p, merge=True)
         
-        batch.commit()
+        for attempt in range(3):
+            try:
+                batch.commit()
+                break
+            except Exception as e:
+                if attempt == 2:
+                    raise
+                print(f"⚠️ Batch error (pokusaj {attempt+2}/3): {e}")
+                time.sleep(5)
         print(f"✅ Spremljeno {min(i + batch_size, total)}/{total}")
         
         if i + batch_size < total:
